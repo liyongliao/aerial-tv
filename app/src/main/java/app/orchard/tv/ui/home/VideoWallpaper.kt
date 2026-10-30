@@ -127,8 +127,9 @@ fun VideoWallpaper(
             Wallpapers.dropFilmFrost()
             if (p.playbackState == Player.STATE_IDLE) p.prepare()
             p.playWhenReady = true
-            snapshotFlow { showing }.first { it }
-            cover.animateTo(1f, tween(1200, easing = Motion.EaseOut))
+            if (kotlinx.coroutines.withTimeoutOrNull(8_000L) { snapshotFlow { showing }.first { it } } != null) {
+                cover.animateTo(1f, tween(180, easing = Motion.EaseOut))
+            } else cover.snapTo(0f)
         } else {
             val p = player ?: return@LaunchedEffect
             if (!keepNow) {
@@ -136,24 +137,15 @@ fun VideoWallpaper(
                 release()
                 return@LaunchedEffect
             }
+            // Retain the paused video plane. Reading a full 4K frame with a second codec
+            // stalls navigation on MFTR0; returning to the shelf simply resumes this player.
+            p.videoDecoderCounters?.let { DiagLog.i("video wallpaper dropped ${it.droppedBufferCount} of ${it.renderedOutputBufferCount + it.droppedBufferCount} frames") }
             p.pause()
-            DiagLog.i("video wallpaper stops at ${p.currentPosition} ms")
-            if (cover.value > 0f) {
-                val film = p.currentMediaItem?.mediaId
-                val at = p.currentPosition
-                val w = surface?.width?.takeIf { it > 0 } ?: Wallpapers.screenW
-                val h = surface?.height?.takeIf { it > 0 } ?: Wallpapers.screenH
-                val frame = surface?.let { copyFrame(it) }
-                    ?: film?.let { id -> withContext(Dispatchers.IO) { fileFrame(context, id, at, w, h) } }
-                if (frame != null && film != null) Wallpapers.useLiveFrame(frame, film, at)
-                cover.animateTo(0f, tween(if (frame != null) 320 else 600, easing = Motion.EaseOut))
-            }
-            delay(KEEP_STOPPED_MS)
-            release()
+            DiagLog.i("video wallpaper paused at ${p.currentPosition} ms; retaining surface")
         }
     }
     LaunchedEffect(keep) {
-        if (!keep && !play && player != null && cover.value == 0f) release()
+        if (!keep) { cover.snapTo(0f); release() }
     }
     DisposableEffect(Unit) { onDispose { release() } }
 

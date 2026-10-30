@@ -345,7 +345,20 @@ class MainActivity : ComponentActivity() {
      */
     private val screenOnReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF) { BootOpen.noteScreenOff(context); return }
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                BootOpen.noteScreenOff(context)
+                vm.screenInteractive = false
+                vm.homeBounce = false
+                hideScreensaver()
+                return
+            }
+            // Firmware can keep Home RESUMED through standby. A new Surface/player is required
+            // even if Android never delivers another onResume (MFTR0, HyperOS 3).
+            vm.wakeGeneration++
+            vm.screenInteractive = true
+            hideScreensaver()
+            restartIdleTimer()
+            DiagLog.i("screen on: rebuild wallpaper surface ${vm.wakeGeneration}")
             idleHandler.postDelayed({
                 if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) openBootSource("screen on")
             }, 1500)
@@ -774,6 +787,9 @@ class MainActivity : ComponentActivity() {
 
     /** What onResume does once the user is unlocked; also run by a start that was locked before. */
     private fun resumeWork() {
+        val interactive = (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+        if (interactive && !vm.screenInteractive) vm.wakeGeneration++
+        vm.screenInteractive = interactive
         vm.resumed = true
         idleHandler.removeCallbacks(endHomeBounce)
         vm.homeBounce = false

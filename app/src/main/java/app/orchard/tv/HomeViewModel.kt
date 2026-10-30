@@ -136,7 +136,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     var homeBounce by mutableStateOf(false)
 
     /** In front for the wallpaper's film: resumed, or only bouncing off Home (homeBounce). */
-    val filmFront: Boolean get() = resumed || homeBounce
+    var screenInteractive by mutableStateOf(true)
+    var wakeGeneration by mutableLongStateOf(0L)
+    val filmFront: Boolean get() = screenInteractive && (resumed || homeBounce)
 
     /** Aerial's screensaver is up (see MainActivity's idle timer). */
     var screensaverVisible by mutableStateOf(false)

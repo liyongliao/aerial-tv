@@ -76,7 +76,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.orchard.tv.CcPage
-import app.orchard.tv.BuildConfig
 import app.orchard.tv.HomeViewModel
 import app.orchard.tv.Overlay
 import app.orchard.tv.R
@@ -327,9 +326,7 @@ private fun MainPage(vm: HomeViewModel, now: LocalDateTime, takeFocus: Boolean, 
 /**
  * How to move to the new version: "Download and Install" fetches the APK and opens the system
  * installer (Updates.install). For TVs whose firmware lets no app install another (see
- * Updates.Failure), and for copies older than the button, a QR code opens the website's update
- * page on a phone, with the install command for this TV to copy: typing it off the screen was
- * too much. The TV's address rides in the fragment, which the browser does not send.
+ * Updates.Failure), a QR code opens this fork's update page on a phone.
  */
 @Composable
 private fun UpdatePage(vm: HomeViewModel, takeFocus: Boolean) {
@@ -344,9 +341,7 @@ private fun UpdatePage(vm: HomeViewModel, takeFocus: Boolean) {
     val canInstall = remember { Updates.canInstall(context) }
     var qr by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(Unit) {
-        val ip = PhoneServer.lanAddress(context)
-        val url = "https://aerial.qust.me/update/#v=${Updates.current}&f=${BuildConfig.FLAVOR}" + (ip?.let { "&tv=$it" } ?: "")
-        qr = withContext(Dispatchers.Default) { PhoneServer.qr(url).asImageBitmap() }
+        qr = withContext(Dispatchers.Default) { PhoneServer.qr(Updates.CHANNEL_URL).asImageBitmap() }
     }
     Column {
         MenuRow(
@@ -402,8 +397,7 @@ private fun UpdatePage(vm: HomeViewModel, takeFocus: Boolean) {
 /**
  * For a TV where Aerial was installed from the APK alone (a USB stick, an app store): it opens, but
  * Home, power-on and wake still go to the stock launcher (issue #213). The settings pages that can
- * fix that on the TV itself, where the TV has them, and a QR code to the website's page with this
- * TV's install command, which does all of it.
+ * fix that on the TV itself, where the TV has them, and a QR code to this fork's setup notes.
  */
 @Composable
 private fun SetupPage(vm: HomeViewModel, takeFocus: Boolean, onOpen: (android.content.Intent) -> Unit) {
@@ -419,9 +413,7 @@ private fun SetupPage(vm: HomeViewModel, takeFocus: Boolean, onOpen: (android.co
     val revival = remember { SystemProbe.revivalSettingsIntent(context) }
     var qr by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(Unit) {
-        val ip = PhoneServer.lanAddress(context)
-        val url = "https://aerial.qust.me/update/#setup=1&v=${Updates.current}&f=${BuildConfig.FLAVOR}" + (ip?.let { "&tv=$it" } ?: "")
-        qr = withContext(Dispatchers.Default) { PhoneServer.qr(url).asImageBitmap() }
+        qr = withContext(Dispatchers.Default) { PhoneServer.qr(Updates.CHANNEL_URL).asImageBitmap() }
     }
     Column {
         MenuRow(Glyph.ChevronLeft, stringResource(R.string.cc_setup_title), focusRequester = first, onClick = { vm.overlay = Overlay.ControlCenter(CcPage.Main) })

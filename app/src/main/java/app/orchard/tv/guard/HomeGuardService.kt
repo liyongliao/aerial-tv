@@ -1409,8 +1409,14 @@ class HomeGuardService : AccessibilityService() {
             // Within the pause Home itself makes, not one the viewer makes after it by opening an app.
             if (s.backOnPause && SystemClock.uptimeMillis() - s.homeInAerialAt < HOME_PAUSE_MS) {
                 s.homeInAerialAt = Long.MIN_VALUE / 2
-                Log.i(TAG, "Aerial paused for Home; bringing it back before the stock launcher shows")
-                s.goHome()
+                if (!s.isDefaultHome()) {
+                    Log.i(TAG, "Aerial paused for Home; bringing it back before the stock launcher shows")
+                    s.goHome()
+                } else {
+                    // Native HOME already targets this activity. Sending another start doubles
+                    // onNewIntent/onResume and interrupts the wallpaper for no reason (MFTR0).
+                    Log.i(TAG, "Native Home delivery; retaining wallpaper without another start")
+                }
                 return true
             }
             return false

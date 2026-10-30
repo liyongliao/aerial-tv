@@ -206,6 +206,7 @@ fun LiveWallpaper(
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
+                    showing = false
                     DiagLog.i("wallpaper film failed (${error.errorCodeName})")
                     // The same film again, from where it was: going on to the next one on any error
                     // left the screensaver on another film (TCL MT5879, DECODING_FAILED three times
@@ -273,182 +274,39 @@ fun LiveWallpaper(
         Wallpapers.useLiveFrame(frame, film, at)
     }
 
-    // A small frame taken every few seconds while the film moves: the plate's glass over the
-    // moving film (Wallpapers.filmFrost), and the glass for wherever it stops, at hand. Copied off
-    // the video plane where PixelCopy reads it (TCL MT5879); else a key frame from the film's file,
-    // opened ahead (see FrameReader; Xiaomi MiTV-MFTR0).
-    var glassSample by remember { mutableStateOf<GlassSample?>(null) }
-    LaunchedEffect(live.film, play, showing) {
-        val id = live.film?.id ?: return@LaunchedEffect
-        if (!play || !showing) return@LaunchedEffect
-        if (pixelCopy == false && glassFrames) reader.open(id)
-        // Under the screensaver no plate shows: a frame only so the glass is at hand where it stops.
-        sampleGlass({ player }, every = { if (inSaver) SAVER_GLASS_EVERY_MS else GLASS_EVERY_MS }) { at ->
-            val frame = surface?.let { copyGlass(it) }
-                ?: if (pixelCopy == true) null else reader.frame(id, at, 320, 180, exact = false, quiet = true)
-            frame?.also {
-                glassSample = GlassSample(id, at, it)
-                Wallpapers.keepClipGlass(id, it) { live.film?.id }
-            }
-        }
-    }
-
-    // With a screensaver of aerials in another format (Dolby Vision chosen), the index of the film
-    // showing is fetched in that format: the screensaver goes on from this film and moment.
-    LaunchedEffect(live.film, showing) {
-        val film = live.film ?: return@LaunchedEffect
-        if (!showing || Wallpapers.screensaver != ScreensaverMode.Aerial) return@LaunchedEffect
-        val saver = AerialFormats.forScreensaver(context, overWallpaper = true)
-        if (saver != AerialFormats.forWallpaper(context)) {
-            AerialStream.prepareSeek(context, film, saver, Build.VERSION.SDK_INT < Build.VERSION_CODES.N)
-        }
-    }
-
-    LaunchedEffect(play) {
+    // Do not open a second network/codec reader while navigating. On MFTR0 PixelCopy
+    // returns black and the fallback retriever consumed 1.5-2.7 seconds per transition.
+    // Keep the existing poster's glass; keep the actual paused Surface for instant resume.
+    LaunchedEffect(play, keep) {
         live.stopped = false
+        if (!keep) {
+            cover.snapTo(0f)
+            release()
+            return@LaunchedEffect
+        }
         if (play) {
-            // Let go past its picture (into an app, or a screensaver of its own), it goes on from
-            // where it was let go: the same film, not the one the picture came from, which could be
-            // any film from the last stop on the grid (owner, 2026-10-29). The picture caught up to
-            // that moment behind the app (LaunchedEffect(keep)); if it has not yet, it does under
-            // the moving film. Catching up first held Home still for about 3 s (Xiaomi MiTV-MFTR0).
-            val left = if (player == null) Wallpapers.leftLiveSpot() else null
             val p = player ?: open().also { player = it }
-            DiagLog.i("wallpaper film starts (state ${p.playbackState}, ${p.currentMediaItem?.mediaId} at ${p.currentPosition} ms)")
-            // It moves on from the frame the picture is: that picture's glass until the first sample.
-            Wallpapers.dropFilmFrost()
-            // Its decoder was let go for the screensaver (LiveFilm.letDecoderGo).
+            DiagLog.i("stable wallpaper resume at ${p.currentPosition} ms, state ${p.playbackState}")
             if (p.playbackState == Player.STATE_IDLE) p.prepare()
             p.playWhenReady = true
-            snapshotFlow { showing }.first { it }
-            DiagLog.i("wallpaper film moving")
-            cover.animateTo(1f, tween(1200, easing = Motion.EaseOut))
-            if (left != null) {
-                delay(CATCH_UP_UNDER_FILM_MS)
-                catchUp(left, underFilm = true)
+            if (withTimeoutOrNull(8_000L) { snapshotFlow { showing }.first { it } } == null) {
+                cover.snapTo(0f)
+                DiagLog.i("wallpaper frame timeout: keep the poster visible")
+            } else {
+                DiagLog.i("stable wallpaper moving")
+                cover.animateTo(1f, tween(180, easing = Motion.EaseOut))
             }
         } else {
-            val p = player ?: return@LaunchedEffect
-            // Into the screensaver or an app: the decoder is needed elsewhere.
-            if (!keepNow) {
-                // Into an app, Home shows on until it is drawn (Xiaomi's settings slide in over it;
-                // Bilibili covered it 3.1 s after Home paused, MiTV-MFTR0). Let go at once, the film
-                // left black there until the picture came back, an older one. Stopped on its frame,
-                // that frame becomes the picture first, within LEAVE_FRAME_MS: the decoder is held,
-                // paused, that much longer. Not into a screensaver of its own, which needs it at once.
-                if (cover.value > 0f && !otherFormatNow && !AerialStart.running) leaveOnPicture(p)
-                release()
-                return@LaunchedEffect
-            }
-            p.pause()
-            if (cover.value > 0f) {
-                // The stopped frame becomes the picture; once Home has it, the film can go. Where
-                // the video plane cannot be read, the same moment is decoded from the 1080p file:
-                // first the key frame before it, small, which is all the glass needs, so the plate
-                // is back with the apps; then the exact frame, which looks just like the paused film.
-                val film = p.currentMediaItem?.mediaId
-                val at = p.currentPosition
-                val w = surface?.width ?: Wallpapers.screenW
-                val h = surface?.height ?: Wallpapers.screenH
-                p.videoDecoderCounters?.let { DiagLog.i("wallpaper film dropped ${it.droppedBufferCount} of ${it.renderedOutputBufferCount + it.droppedBufferCount} frames") }
-                val before = Wallpapers.frosted
-                // Any frame of the same shot will do: an aerial moves slowly, and frosted, seconds
-                // apart look alike, while the glass of another shot showed in the grid until this
-                // one was decoded, 0.5-3 s (Xiaomi MiTV-MFTR0, issue #727).
-                glassSample?.takeIf { it.film == film && abs(it.atMs - at) <= SAME_SHOT_MS }?.let {
-                    Wallpapers.useLiveFrost(it.frame)
-                    glassReady(live)
-                }
-                glassSample = null
-                var frame = if (pixelCopy == false) null else surface?.let { capture(it) }
-                if (frame == null && film != null) {
-                    // Stopped by a panel opening: decoded once the panel is in. Read from Apple and
-                    // decrypted in this process (the media server's reads come through its binder
-                    // threads), it took a third of the app's CPU in the menu's first 1.5 s (Xiaomi
-                    // MiTV-MFTR0). An open panel keeps the glass it opened with (liquidGlass), so
-                    // nothing waits on it there; the grid's glass does, and the grid has no wait.
-                    if (panelNow) delay(PANEL_IN_MS)
-                    if (!live.stopped) reader.frame(film, at, 320, 180, exact = false)?.let {
-                        Wallpapers.useLiveFrost(it)
-                        glassReady(live)
-                    }
-                    // The exact frame is decoded from the key frame before it, reading that whole
-                    // stretch of file while the paused player still fills its buffer; on MFTR0 that
-                    // timed out at times. The nearest key frame alone is a second or so off at most.
-                    frame = reader.frame(film, at, w, h, exact = true)
-                        ?: reader.frame(film, at, w, h, exact = false, nearest = true)
-                    if (frame == null && live.stopped) Wallpapers.restoreFrost(before)
-                }
-                if (frame != null) {
-                    Wallpapers.useLiveFrame(frame, film.orEmpty(), at)
-                    if (!live.stopped) glassReady(live)
-                    // The paused film stands in for its picture while Home shows it plainly, and
-                    // moves on from there when Home is still again. The picture, decoded apart
-                    // and drawn on another plane with other processing, showed a slight jolt
-                    // when swapped in. It takes over under a panel, whose blur the film would
-                    // not get, or after KEEP_STOPPED_MS. Not where the copy of the plane came back
-                    // green: the paused film shows green there too once Home redraws over it
-                    // (Hisense T963, Xiaomi MiTV-MTEQ0 and MFTP0: green until the film moved
-                    // again, issues #256, #412).
-                    if (!copyLostColour) {
-                        withTimeoutOrNull(KEEP_STOPPED_MS) { snapshotFlow { standInNow && keepNow }.first { !it } }
-                    }
-                    if (!keepNow) {
-                        live.stopped = false
-                        // The picture is this frame: it shows rather than black while Home is still
-                        // seen, an app coming in over it (see leaveOnPicture).
-                        if (!otherFormatNow && !AerialStart.running) cover.snapTo(0f)
-                        release()
-                        return@LaunchedEffect
-                    }
-                    DiagLog.i("wallpaper picture takes over from the stopped film")
-                    cover.animateTo(0f, tween(320, easing = Motion.EaseOut))
-                } else {
-                    DiagLog.i("wallpaper film: no frame copied; back to the last picture")
-                    cover.animateTo(0f, tween(600, easing = Motion.EaseOut))
-                }
-                live.stopped = false
-            }
-            delay(KEEP_STOPPED_MS)
-            release()
+            player?.videoDecoderCounters?.let { DiagLog.i("wallpaper film dropped ${it.droppedBufferCount} of ${it.renderedOutputBufferCount + it.droppedBufferCount} frames") }
+            player?.pause()
+            live.stopped = player != null && cover.value > 0f
+            DiagLog.i("stable wallpaper paused; retaining surface")
         }
     }
-    // A stopped player still holds its decoder, and some TVs have only one video path: on Xiaomi
-    // MiTV-MFTR0 the screensaver's decoder lost its resources and its films failed while it was held.
-    LaunchedEffect(keep) {
-        if (!keep && !play && player != null && cover.value == 0f) release()
-        if (!keep && otherFormatNow) {
-            fresh = true
-            blackForFilm = true
-        }
-        val black = keep && blackForFilm && play && cover.value > 0f
-        if (keep) blackForFilm = false
-        if (black) {
-            // Black until the film's first frame; the picture only if it does not come.
-            if (withTimeoutOrNull(FRESH_WAIT_MS) { snapshotFlow { showing }.first { it } } == null) cover.snapTo(0f)
-        } else if (keep) {
-            // Let go while it showed: the picture comes back before the film does.
-            if (player == null) cover.snapTo(0f)
-            // Back on Home off the shelf, with the film let go past its picture: the picture
-            // catches up now. On the shelf the film comes in over the picture as it is (above).
-            if (!play) Wallpapers.leftLiveSpot()?.let { catchUp(it) }
-        } else {
-            if (cover.value > 0f && !otherFormatNow) {
-                // Let go into a screensaver of its own: the picture, of an earlier moment and maybe
-                // another film, showed through as the screensaver faded in over it (Xiaomi MiTV-MFTR0,
-                // Dolby Vision screensaver over the aerial wallpaper). It comes back once covered.
-                delay(SAVER_COVERS_MS)
-                if (player == null) cover.snapTo(0f)
-            }
-            // Behind an app: the picture catches up to where the film was let go, out of sight, so
-            // Home comes back on the shot it left with the film going on from it. Once the app is
-            // in; not under a screensaver of aerials, which moves the spot on every second.
-            delay(BEHIND_CATCH_UP_MS)
-            val left = Wallpapers.leftLiveSpot()
-            if (!keepNow && !otherFormatNow && !AerialStart.running && player == null && left != null) {
-                catchUp(left, underFilm = true)
-                if (player == null) reader.close()
-            }
+    LaunchedEffect(showing, play) {
+        if (play && !showing) {
+            delay(1500)
+            if (!showing) cover.snapTo(0f)
         }
     }
     DisposableEffect(Unit) { onDispose { release() } }

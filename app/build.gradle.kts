@@ -12,12 +12,12 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.orchard.tv"
+        applicationId = "com.ts.launcher"
         // Android 5.0. Compose 1.10 and later need 6.0, so the Compose BOM below stays on 1.9.
         minSdk = 21
         targetSdk = 34
-        versionCode = 85
-        versionName = "1.69"
+        versionCode = 87
+        versionName = "1.70-mftr0.1"
         // `./gradlew -Pdiag ...`: a build for one reporter's TV whose logcat shows no app lines;
         // see system/DiagLog.kt.
         val diag = project.hasProperty("diag")

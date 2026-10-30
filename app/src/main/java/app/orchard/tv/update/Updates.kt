@@ -31,20 +31,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Whether a newer release is out (issues #24, #76). Most owners stay on the version they installed
- * and report bugs fixed long ago. At most once a day Aerial reads the latest release's tag from the
- * website (reachable in China, unlike GitHub); Control Center then names the new version and says
- * how to update. Nothing is downloaded or installed in the background: only when the owner picks
- * "Download and Install" does Aerial fetch the new APK and hand it to the system installer
- * ([install]).
- *
- * Every three hours, not once a day: several releases can come out in one day, and a TV that had
- * checked in the morning kept offering nothing until the next day (1.22 to 1.25 on 2026-10-22).
+ * Reads this fork's version file every three hours and offers a newer release in Control Center.
+ * Nothing is downloaded or installed in the background: only when the owner picks
+ * "Download and Install" does Aerial fetch the APK and hand it to the system installer ([install]).
  */
 object Updates {
     private const val TAG = "AerialUpdates"
     private const val PREFS = "updates"
-    private const val VERSION_URL = "https://aerial.qust.me/download/version.txt"
+    // This Xiaomi fork has a different package and signing key. Updates are published
+    // together with this branch so the TV never offers an incompatible upstream APK.
+    const val CHANNEL_URL = "https://github.com/liyongliao/aerial-tv/tree/xiaomi-mftr0/update"
+    private const val UPDATE_BASE = "https://raw.githubusercontent.com/liyongliao/aerial-tv/xiaomi-mftr0/update"
+    private val VERSION_URL = "$UPDATE_BASE/version.txt"
     private const val CHECK_EVERY_MS = 3 * 60 * 60 * 1000L
     private const val RETRY_MS = 10 * 60 * 1000L
 
@@ -143,18 +141,18 @@ object Updates {
     }
 
     enum class Failure {
-        /** Neither the website nor GitHub gave a complete APK. */
+        /** The branch did not provide a complete APK. */
         Download,
         /** The TV lets no app hand an APK to its installer, or has no installer to hand it to. */
         Blocked,
-        /** This copy is not the official package or not signed with the official key. */
+        /** This copy is not this fork's package or is signed with another key. */
         NotOfficial,
-        /** The downloaded APK is no newer than this one (the website not yet updated). */
+        /** The downloaded APK's version does not match the offered newer version. */
         NotNewer,
     }
 
-    /** The official package. Copies renamed for one firmware (OPPO, see docs/devices) cannot update from the release. */
-    private const val PACKAGE = "app.orchard.tv"
+    /** The package installed on this TV; upstream's app.orchard.tv cannot replace it. */
+    private const val PACKAGE = "com.ts.launcher"
 
     /** Whether this copy can update itself from the release at all. */
     fun canInstall(context: Context): Boolean = context.packageName == PACKAGE
@@ -199,8 +197,9 @@ object Updates {
             }
             val failure = when {
                 ready == null -> Failure.Download
+                ready.versionName?.substringBefore('-') != available -> Failure.NotNewer
                 !sameSigner(app, ready) -> Failure.NotOfficial
-                versionCode(ready) < BuildConfig.VERSION_CODE -> Failure.NotNewer
+                versionCode(ready) <= BuildConfig.VERSION_CODE -> Failure.NotNewer
                 else -> null
             }
             if (failure != null) {
@@ -303,7 +302,7 @@ object Updates {
      */
     @Volatile var testApk: File? = null
 
-    /** The website first (reachable in China), then GitHub. Returns the APK's info once it parses. */
+    /** Downloads from this branch. Returns the APK's info once it parses. */
     private suspend fun downloadFrom(context: Context, file: File): PackageInfo? {
         testApk?.takeIf { it.isFile }?.let { test ->
             file.parentFile?.mkdirs()
@@ -312,10 +311,7 @@ object Updates {
             return verify(context, file)
         }
         val name = "aerial-${BuildConfig.FLAVOR}.apk"
-        val sources = listOf(
-            "https://aerial.qust.me/download/$name",
-            "https://github.com/pengchujin/aerial-tv/releases/latest/download/$name",
-        )
+        val sources = listOf("$UPDATE_BASE/$name")
         for (url in sources) {
             val ok = runCatching { download(url, file) }
                 .onFailure { Log.w(TAG, "could not download $url", it) }

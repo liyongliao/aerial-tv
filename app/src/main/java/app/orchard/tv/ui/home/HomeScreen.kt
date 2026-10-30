@@ -603,6 +603,7 @@ fun HomeScreen(
         val filmMoves = vm.filmFront && overlay == Overlay.None && !vm.screensaverVisible && !pastShelf &&
             !inGrid && moving == null
         val sourceInput = Wallpapers.sourceInput
+        key(vm.wakeGeneration) {
         when {
             Wallpapers.selectedId == Wallpapers.LIVE -> LiveWallpaper(
                 moving = filmMoves,
@@ -631,6 +632,7 @@ fun HomeScreen(
                 )
             }
             sourceInput != null -> SourceWallpaper(sourceInput, show = vm.resumed && !vm.screensaverVisible, cover = filmCover)
+        }
         }
         Box(
             Modifier
@@ -675,7 +677,7 @@ fun HomeScreen(
                 )
             }
             // Another wallpaper chosen: nothing shows through until the new one has a frame.
-            LaunchedEffect(Wallpapers.selectedId) { filmCover.snapTo(0f) }
+            LaunchedEffect(Wallpapers.selectedId, vm.wakeGeneration, vm.screenInteractive) { filmCover.snapTo(0f) }
             // The aerial film's own glass for the grid: the one playing or stopped, else the one
             // the picture was taken from.
             val pictureClip = remember(Wallpapers.backdrop) { Wallpapers.livePictureSpot()?.first }
